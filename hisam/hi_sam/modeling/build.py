@@ -153,7 +153,7 @@ def _build_sam(
 
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
-            state_dict = torch.load(f, map_location="gpu", weights_only=True)
+            state_dict = torch.load(f, map_location="cuda" if torch.cuda.is_available() else "cpu", weights_only=True)
         dict_keys = state_dict.keys()
         if 'optimizer' in dict_keys or 'lr_scheduler' in dict_keys or 'epoch' in dict_keys:
             state_dict = state_dict['model']
@@ -175,7 +175,7 @@ def _build_sam(
                     new_key = key.replace('mask_decoder', 'hi_decoder')
                     state_dict[new_key] = value
 
-        # load SAM's ViT backbone paras.
+        # load SAM's ViT backbone paras. (optional - skip if file not found)
         pretrained_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'pretrained_checkpoint')
         if args.model_type == 'vit_b':
             sam_path = os.path.join(pretrained_dir, 'sam_vit_b_01ec64.pth')
@@ -183,12 +183,16 @@ def _build_sam(
             sam_path = os.path.join(pretrained_dir, 'sam_vit_l_0b3195.pth')
         elif args.model_type == 'vit_h':
             sam_path = os.path.join(pretrained_dir, 'sam_vit_h_4b8939.pth')
-        with open(sam_path, "rb") as f:
-            torch.load(f, map_location="gpu", weights_only=True)
-        for key, value in sam_dict.items():
-            if key not in dict_keys:
-                state_dict[key] = value
-        del sam_dict
+        
+        if os.path.exists(sam_path):
+            with open(sam_path, "rb") as f:
+                sam_dict = torch.load(f, map_location="cuda" if torch.cuda.is_available() else "cpu", weights_only=True)
+            for key, value in sam_dict.items():
+                if key not in dict_keys:
+                    state_dict[key] = value
+            del sam_dict
+        else:
+            print(f"[INFO] SAM backbone checkpoint not found at {sam_path}, assuming weights are in main checkpoint")
 
         info = model.load_state_dict(state_dict, strict=False)
         print(info)
@@ -290,7 +294,7 @@ def _build_efficient_sam(encoder_patch_embed_dim, encoder_num_heads, args):
     
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
-            state_dict = torch.load(f, map_location="gpu", weights_only=True)
+            state_dict = torch.load(f, map_location="cuda" if torch.cuda.is_available() else "cpu", weights_only=True)
         if 'model' in state_dict.keys():
             state_dict = state_dict['model']
         if args.hier_det:
