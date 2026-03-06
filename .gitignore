@@ -1,4 +1,5 @@
 *__pycache__/
+venv
 /models
 /pretrained_checkpoint
 hi_sam.zip

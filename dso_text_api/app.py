@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
+import pandas as pd
+
 from dso_common.config import env_bool, env_int, env_str
 from dso_common.llm_client import build_llm_client
 from dso_legal_tools.rule_extraction import process_legal_terms
@@ -348,6 +350,92 @@ def load_models_text():
             "rules_count": rules_count,
             "panel_detection": enable_panel_detection,
         })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        }), 500
+
+
+@app_text.route('/convert_excel_text', methods=['POST'])
+def convert_excel_text():
+    global _loaded
+
+    try:
+        if 'excel' not in request.files:
+            return jsonify({"status": "error", "message": "No Excel file provided"}), 400
+
+        excel_file = request.files['excel']
+        sheet_name = request.form.get('sheet_name', 'Text Availability - 21A')
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_excel:
+            excel_file.save(tmp_excel.name)
+            excel_path = tmp_excel.name
+
+        try:
+            terms = _excel_text_sheet_to_legal_terms(excel_path=excel_path, sheet_name=sheet_name)
+
+            with tempfile.NamedTemporaryFile(mode='w', suffix='_legal_terms_text.json', delete=False, encoding='utf-8') as tmp_terms:
+                import json
+
+                json.dump(terms, tmp_terms, ensure_ascii=False, indent=2)
+                terms_path = tmp_terms.name
+
+            rules_path = tempfile.mktemp(suffix='_legal_rules_text.json')
+
+            provider = env_str("PARSER_PROVIDER", env_str("VALIDATOR_PROVIDER", "fireworks") or "fireworks") or "fireworks"
+            api_key = env_str("PARSER_API_KEY")
+            if not api_key:
+                api_key = env_str("OPENAI_API_KEY") if provider == "openai" else env_str("FIREWORKS_API_KEY")
+            if not api_key:
+                raise ValueError("Missing PARSER_API_KEY (or OPENAI_API_KEY/FIREWORKS_API_KEY)")
+
+            model = env_str(
+                "PARSER_MODEL",
+                env_str("VALIDATOR_MODEL", "accounts/fireworks/models/llama-v3p1-70b-instruct")
+                or "accounts/fireworks/models/llama-v3p1-70b-instruct",
+            )
+            delay = float(env_str("PARSER_DELAY", "0.5") or "0.5")
+
+            process_legal_terms(
+                input_path=terms_path,
+                output_path=rules_path,
+                delay_between_calls=delay,
+                parser_api_key=api_key,
+                parser_provider=provider,
+                parser_model=model,
+            )
+
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                import json
+
+                rules = json.load(f)
+
+            if _loaded is not None:
+                _loaded.legal_rules_text = rules
+
+            total_items = 0
+            try:
+                for sec in terms:
+                    total_items += len(sec.get('item', []))
+            except Exception:
+                total_items = 0
+
+            return jsonify({
+                "status": "success",
+                "message": "Excel converted successfully",
+                "legal_terms_path": terms_path,
+                "legal_rules_path": rules_path,
+                "sections_count": len(terms),
+                "total_items": total_items,
+            })
+        finally:
+            try:
+                os.unlink(excel_path)
+            except OSError:
+                pass
 
     except Exception as e:
         return jsonify({
