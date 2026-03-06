@@ -1,0 +1,11 @@
+services:
+  dso-gradio-ui:
+    build:
+      context: ..
+      dockerfile: dso_ui/Dockerfile
+    environment:
+      - SYMBOL_API=${SYMBOL_API}
+      - TEXT_API=${TEXT_API}
+      - PORT=7860
+    ports:
+      - "7860:7860"

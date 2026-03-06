@@ -1,1 +1,5 @@
 *__pycache__/
+/models
+/pretrained_checkpoint
+hi_sam.zip
+*.ipynb
